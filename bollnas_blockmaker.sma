@@ -58,6 +58,7 @@ new const g_model_invincibility[] =		"models/ExecuteGaming/Normal/Invincibility.
 new const g_model_stealth[] =			"models/ExecuteGaming/Normal/Stealth.mdl";
 new const g_model_boots_of_speed[] =		"models/ExecuteGaming/Normal/BootsOfSpeed.mdl";
 new const g_model_xpblock[] =			"models/ExecuteGaming/Normal/xpblock.mdl";
+new const g_model_moneygiver[] =		"models/ExecuteGaming/Normal/moneygiver.mdl";
 
 new const g_sprite_light[] =			"sprites/ExecuteGaming/Light.spr";
 
@@ -201,6 +202,8 @@ new Float:g_set_velocity[33][3];
 new Float:g_checkpoint_position[33][3];
 
 new g_cvar_textures;
+new g_cvar_xpblock;
+new g_cvar_moneygiver;
 
 new g_max_players;
 
@@ -227,6 +230,7 @@ enum
 	STEALTH,
 	BOOTS_OF_SPEED,
 	XPBLOCK,
+	MONEYGIVER,
 	
 	TOTAL_BLOCKS
 };
@@ -282,7 +286,8 @@ new const g_block_names[TOTAL_BLOCKS][] =
 	"Invincibility",
 	"Stealth",
 	"Boots Of Speed",
-	"XP Block"
+	"XP Block",
+	"Money Giver"
 };
 
 new const g_property1_name[TOTAL_BLOCKS][] =
@@ -307,7 +312,8 @@ new const g_property1_name[TOTAL_BLOCKS][] =
 	"Invincibility Time",
 	"Stealth Time",
 	"Boots Of Speed Time",
-	"XP To Give"
+	"XP To Give",
+	"Money Amount"
 };
 
 new const g_property1_default_value[TOTAL_BLOCKS][] =
@@ -332,7 +338,8 @@ new const g_property1_default_value[TOTAL_BLOCKS][] =
 	"10",
 	"10",
 	"10",
-	"50"
+	"50",
+	"500"
 };
 
 new const g_property2_name[TOTAL_BLOCKS][] =
@@ -357,6 +364,7 @@ new const g_property2_name[TOTAL_BLOCKS][] =
 	"Delay After Usage",
 	"Delay After Usage",
 	"Delay After Usage",
+	"",
 	""
 };
 
@@ -382,6 +390,7 @@ new const g_property2_default_value[TOTAL_BLOCKS][] =
 	"60",
 	"60",
 	"60",
+	"",
 	""
 };
 
@@ -407,7 +416,8 @@ new const g_property3_name[TOTAL_BLOCKS][] =
 	"",
 	"",
 	"Speed",
-	"Transparency"
+	"Transparency",
+	""
 };
 
 new const g_property3_default_value[TOTAL_BLOCKS][] =
@@ -432,7 +442,8 @@ new const g_property3_default_value[TOTAL_BLOCKS][] =
 	"",
 	"",
 	"400",
-	"255"
+	"255",
+	""
 };
 
 new const g_property4_name[TOTAL_BLOCKS][] =
@@ -452,6 +463,7 @@ new const g_property4_name[TOTAL_BLOCKS][] =
 	"On Top Only",
 	"On Top Only",
 	"",
+	"On Top Only",
 	"On Top Only",
 	"On Top Only",
 	"On Top Only",
@@ -482,6 +494,7 @@ new const g_property4_default_value[TOTAL_BLOCKS][] =
 	"1",
 	"1",
 	"1",
+	"1",
 	"1"
 };
 
@@ -507,7 +520,8 @@ new const g_block_save_ids[TOTAL_BLOCKS] =
 	'R',
 	'S',
 	'T',
-	'U'
+	'U',
+	'V'
 };
 
 new g_block_models[TOTAL_BLOCKS][256];
@@ -537,6 +551,7 @@ public plugin_precache()
 	g_block_models[STEALTH] =		g_model_stealth;
 	g_block_models[BOOTS_OF_SPEED] =	g_model_boots_of_speed;
 	g_block_models[XPBLOCK] =		g_model_xpblock;
+	g_block_models[MONEYGIVER] =		g_model_moneygiver;
 	
 	SetupBlockRendering(GLASS, TRANSWHITE, 255, 255, 255, 100);
 	SetupBlockRendering(INVINCIBILITY, GLOWSHELL, 255, 255, 255, 16);
@@ -636,7 +651,9 @@ public plugin_init()
 	
 	register_message(get_user_msgid("StatusValue"),	"MsgStatusValue");
 	
-	g_cvar_textures =	register_cvar("BCM_Textures", "Reverse", 0, 0.0);
+	g_cvar_textures =	register_cvar("BCM_Textures",		"Reverse",	0,	0.0);
+	g_cvar_xpblock =	register_cvar("BCM_XPBlock",		"1",		0,	0.0);
+	g_cvar_moneygiver =	register_cvar("BCM_MoneyGiver",		"1",		0,	0.0);
 	
 	g_max_players =		get_maxplayers();
 	
@@ -1101,6 +1118,7 @@ public pfn_touch(ent, id)
 			case INVINCIBILITY:			ActionInvincibility(id, ent);
 			case BOOTS_OF_SPEED:			ActionBootsOfSpeed(id, ent);
 			case XPBLOCK:				ActionXPBlock(id, ent);
+			case MONEYGIVER:			ActionMoneyGiver(id, ent);
 		}
 	}
 	
@@ -1582,6 +1600,9 @@ ActionBootsOfSpeed(id, ent)
 
 ActionXPBlock(id, ent)
 {
+	if ( !get_pcvar_num(g_cvar_xpblock) )
+		return;
+	
 	if ( cs_get_user_team(id) == CS_TEAM_T )
 	{
 		if ( !g_xpblock_used[id] )
@@ -1599,6 +1620,36 @@ ActionXPBlock(id, ent)
 		{
 			set_hudmessage(0, 255, 0, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
 			show_hudmessage(id, "Only Terrorists can take XP Block!");
+	}
+}
+
+ActionMoneyGiver(id, ent)
+{
+	if ( !get_pcvar_num(g_cvar_moneygiver) )
+		return;
+	
+	if ( cs_get_user_team(id) == CS_TEAM_T )
+	{
+		if ( !g_xpblock_used[id] )
+		{
+			new property[5];
+			GetProperty(ent, 1, property);
+			
+			new money_to_give = str_to_num(property);
+			new current_money = cs_get_user_money(id);
+			new new_money = min(current_money + money_to_give, 16000);
+			
+			cs_set_user_money(id, new_money);
+			g_xpblock_used[id] = true;
+			
+			set_hudmessage(0, 255, 0, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+			show_hudmessage(id, "You received $%i!", money_to_give);
+		}
+	}
+	else
+	{
+		set_hudmessage(255, 50, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+		show_hudmessage(id, "Only Terrorists can collect money!");
 	}
 }
 
@@ -5260,6 +5311,7 @@ LoadBlocks(id)
 				case 'S': block_type = STEALTH;
 				case 'T': block_type = BOOTS_OF_SPEED;
 				case 'U': block_type = XPBLOCK;
+				case 'V': block_type = MONEYGIVER;
 				case '*':
 				{
 					CreateTeleport(0, TELEPORT_START, origin);
