@@ -70,7 +70,8 @@ new const g_sound_stealth[] =			"warcraft3/ExecuteGaming_Stealth.wav";
 new const g_sound_boots_of_speed[] =		"warcraft3/ExecuteGaming_BootsOfSpeed.wav";
 
 new g_sprite_beam;
-new bool:g_xpblock_used[32];
+new g_xpblock_count[32];
+new g_moneygiver_count[32];
 
 enum ( <<= 1 )
 {
@@ -204,6 +205,8 @@ new Float:g_checkpoint_position[33][3];
 new g_cvar_textures;
 new g_cvar_xpblock;
 new g_cvar_moneygiver;
+new g_cvar_xpblock_max;
+new g_cvar_moneygiver_max;
 
 new g_max_players;
 
@@ -654,6 +657,8 @@ public plugin_init()
 	g_cvar_textures =	register_cvar("BCM_Textures",		"Reverse",	0,	0.0);
 	g_cvar_xpblock =	register_cvar("BCM_XPBlock",		"1",		0,	0.0);
 	g_cvar_moneygiver =	register_cvar("BCM_MoneyGiver",		"1",		0,	0.0);
+	g_cvar_xpblock_max =	register_cvar("BCM_XPBlock_Max",	"1",		0,	0.0);
+	g_cvar_moneygiver_max =	register_cvar("BCM_MoneyGiver_Max",	"3",		0,	0.0);
 	
 	g_max_players =		get_maxplayers();
 	
@@ -1605,21 +1610,31 @@ ActionXPBlock(id, ent)
 	
 	if ( cs_get_user_team(id) == CS_TEAM_T )
 	{
-		if ( !g_xpblock_used[id] )
+		new max_uses = get_pcvar_num(g_cvar_xpblock_max);
+		if ( g_xpblock_count[id] < max_uses )
 		{
 			new property[5];
 			GetProperty(ent, 1, property);
 			hnsxp_add_user_xp(id, str_to_num(property));
-			g_xpblock_used[id] = true;
+			g_xpblock_count[id]++;
 			
+			new remaining = max_uses - g_xpblock_count[id];
 			set_hudmessage(0, 255, 0, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
-			show_hudmessage(id, "You got %i more XP!", str_to_num(property));
+			if ( remaining > 0 )
+				show_hudmessage(id, "You got %i more XP! (%i collection(s) left this round)", str_to_num(property), remaining);
+			else
+				show_hudmessage(id, "You got %i more XP! (max collections reached for this round)", str_to_num(property));
 		}
-	}
 		else
 		{
-			set_hudmessage(0, 255, 0, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
-			show_hudmessage(id, "Only Terrorists can take XP Block!");
+			set_hudmessage(255, 50, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+			show_hudmessage(id, "You have already collected the maximum XP blocks this round!");
+		}
+	}
+	else
+	{
+		set_hudmessage(255, 50, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+		show_hudmessage(id, "Only Terrorists can take XP Block!");
 	}
 }
 
@@ -1630,7 +1645,8 @@ ActionMoneyGiver(id, ent)
 	
 	if ( cs_get_user_team(id) == CS_TEAM_T )
 	{
-		if ( !g_xpblock_used[id] )
+		new max_uses = get_pcvar_num(g_cvar_moneygiver_max);
+		if ( g_moneygiver_count[id] < max_uses )
 		{
 			new property[5];
 			GetProperty(ent, 1, property);
@@ -1640,10 +1656,19 @@ ActionMoneyGiver(id, ent)
 			new new_money = min(current_money + money_to_give, 16000);
 			
 			cs_set_user_money(id, new_money);
-			g_xpblock_used[id] = true;
+			g_moneygiver_count[id]++;
 			
+			new remaining = max_uses - g_moneygiver_count[id];
 			set_hudmessage(0, 255, 0, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
-			show_hudmessage(id, "You received $%i!", money_to_give);
+			if ( remaining > 0 )
+				show_hudmessage(id, "You received $%i! (%i collection(s) left this round)", money_to_give, remaining);
+			else
+				show_hudmessage(id, "You received $%i! (max collections reached for this round)", money_to_give);
+		}
+		else
+		{
+			set_hudmessage(255, 50, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+			show_hudmessage(id, "You have already collected the maximum money this round!");
 		}
 	}
 	else
@@ -5378,6 +5403,8 @@ ResetPlayer(id)
 	g_no_slow_down[id] =		false;
 	g_block_status[id] =		false;
 	g_has_hud_text[id] =		false;
+	g_xpblock_count[id] =		0;
+	g_moneygiver_count[id] =	0;
 	
 	g_slap_times[id] =		0;
 	g_honey[id] =			0;
