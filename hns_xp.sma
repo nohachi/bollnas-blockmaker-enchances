@@ -35,9 +35,9 @@ new const MESSAGE_TAG[] =		"[HNS XP]";
 
 // The maximum level for each ability
 
-#define MAXLEVEL_GRENADE		8
+#define MAXLEVEL_GRENADE		7
 #define MAXLEVEL_FLASHBANG_1		4
-#define MAXLEVEL_FLASHBANG_2		4
+#define MAXLEVEL_FLASHBANG_2		3
 #define MAXLEVEL_SMOKEGRENADE		4
 #define MAXLEVEL_TERR_HEALTH		10
 #define MAXLEVEL_CT_HEALTH		5
@@ -50,9 +50,9 @@ new const MESSAGE_TAG[] =		"[HNS XP]";
 
 // The xp amount required to buy the first level
 
-#define FIRST_XP_GRENADE		100
+#define FIRST_XP_GRENADE		200
 #define FIRST_XP_FLASHBANG_1		100
-#define FIRST_XP_FLASHBANG_2		100
+#define FIRST_XP_FLASHBANG_2		200
 #define FIRST_XP_SMOKEGRENADE		100
 #define FIRST_XP_TERR_HEALTH		100
 #define FIRST_XP_CT_HEALTH		100
@@ -64,11 +64,13 @@ new const MESSAGE_TAG[] =		"[HNS XP]";
 #define FIRST_XP_CT_NOFALL		100
 
 // The maximum chance possible for this ability (happens when player has maximum level)
+// NOTE: Chances are defined per-level in g_nade_chances below, not as a single max.
+// FL1 max=20%, FL2 max=15%, HE max=50%, Smoke max=20% (by design, kept low since refills are strong).
 
-#define CHANCE_MAX_GRENADE		100
-#define CHANCE_MAX_FLASHBANG_1		100
-#define CHANCE_MAX_FLASHBANG_2		100
-#define CHANCE_MAX_SMOKEGRENADE		100
+#define CHANCE_MAX_GRENADE		50
+#define CHANCE_MAX_FLASHBANG_1		20
+#define CHANCE_MAX_FLASHBANG_2		15
+#define CHANCE_MAX_SMOKEGRENADE		20
 #define CHANCE_MAX_TERR_RESPAWN		50
 #define CHANCE_MAX_CT_RESPAWN		50
 #define CHANCE_MAX_TERR_NOFALL		80
@@ -98,7 +100,7 @@ new g_vault;
 #endif
 
 
-new const VERSION[] =	"0.0.1";
+new const VERSION[] =	"0.0.2";
 
 
 #pragma semicolon 1
@@ -160,6 +162,19 @@ new const g_nade_max_chance[Grenades] =
 	CHANCE_MAX_FLASHBANG_2,
 	CHANCE_MAX_SMOKEGRENADE
 };
+
+// Custom per-level chance tables (index = level-1)
+// These define the exact refill % chance at each level.
+new const g_he_chances[MAXLEVEL_GRENADE] =    { 5, 10, 15, 20, 30, 40, 50 };
+new const g_fl1_chances[MAXLEVEL_FLASHBANG_1] = { 5, 10, 15, 20 };
+new const g_fl2_chances[MAXLEVEL_FLASHBANG_2] = { 5, 10, 15 };
+new const g_sm_chances[MAXLEVEL_SMOKEGRENADE] =  { 5, 10, 15, 20 };
+
+// Custom per-level XP cost tables (index = level-1)
+new const g_he_costs[MAXLEVEL_GRENADE] =     { 200, 400, 800, 1600, 3200, 5000, 7000 };
+new const g_fl1_costs[MAXLEVEL_FLASHBANG_1] = { 100, 200, 400, 1000 };
+new const g_fl2_costs[MAXLEVEL_FLASHBANG_2] = { 300, 500, 800 };
+new const g_sm_costs[MAXLEVEL_SMOKEGRENADE] =  { 500, 1000, 1500, 2000 };
 
 new const g_team_names[CsTeams][] =
 {
@@ -356,6 +371,17 @@ new g_respawn_level[33][CsTeams];
 new g_health_level[33][CsTeams];
 new g_nofall_level[33][CsTeams];
 
+// Per-round grenade refill tracking
+// g_nade_refill_used[client][NADE_HE]  - true if HE refill chance already fired this round
+// g_nade_refill_used[client][NADE_FL1] - true if FL1 refill chance already fired this round
+// g_nade_refill_used[client][NADE_FL2] - true if FL2 refill chance already fired this round
+// g_nade_refill_used[client][NADE_SM]  - true if Smoke refill chance already fired this round
+new bool:g_nade_refill_used[33][Grenades];
+
+// Tracks how many flashbangs the player has thrown this round,
+// used to decide which flash chance (FL1 vs FL2) to trigger next.
+new g_flash_thrown[33];
+
 new cvar_xp_suicide;
 new cvar_xp_kill;
 new cvar_xp_headshot;
@@ -414,6 +440,11 @@ public plugin_init()
 	RegisterHam(Ham_Killed, "player", "FwdPlayerDeath", 1);
 	RegisterHam(Ham_TakeDamage, "player", "FwdPlayerDamage");
 	
+	// Grenade throw hooks - fire AFTER throw so ammo is already decremented
+	RegisterHam(Ham_CS_ThrowGrenade, "weapon_hegrenade",    "FwdThrowHE",    1);
+	RegisterHam(Ham_CS_ThrowGrenade, "weapon_flashbang",    "FwdThrowFlash", 1);
+	RegisterHam(Ham_CS_ThrowGrenade, "weapon_smokegrenade", "FwdThrowSmoke", 1);
+	
 	cvar_xp_suicide = register_cvar("hnsxp_xp_suicide", "5");
 	cvar_xp_kill = register_cvar("hnsxp_xp_kill", "4");
 	cvar_xp_headshot = register_cvar("hnsxp_xp_headshot", "3");
@@ -466,7 +497,6 @@ public client_authorized(client)
 {
 	if( !is_user_bot(client) && !is_user_hltv(client) )
 	{
-		/* is this still called in LAN, non-steam, etc? */
 		get_user_authid(client, g_authid[client], sizeof(g_authid[]) - 1);
 		
 		if( !IsValidAuthid(g_authid[client]) )
@@ -490,6 +520,8 @@ public client_disconnect(client)
 	g_loaded_data[client] = 0;
 	#endif
 	g_used_revive[client] = 0;
+	
+	ResetNadeRefill(client);
 }
 
 public CmdMainMenu(client)
@@ -598,6 +630,12 @@ public EventNewRound()
 	arrayset(g_used_revive, 0, sizeof(g_used_revive));
 	
 	g_nade_give_time = 9999999.9;
+	
+	// Reset all per-round grenade refill tracking for every player
+	for( new i = g_first_client; i <= g_max_clients; i++ )
+	{
+		ResetNadeRefill(i);
+	}
 }
 
 public EventDeathMsg()
@@ -609,12 +647,10 @@ public EventDeathMsg()
 	{
 		if( IsUserAuthorized(killer) )
 		{
-			// regular kill
 			new xp = get_pcvar_num(cvar_xp_kill);
 			
 			if( read_data(3) )
 			{
-				// headshot kill
 				xp += get_pcvar_num(cvar_xp_headshot);
 			}
 			else
@@ -624,7 +660,6 @@ public EventDeathMsg()
 				
 				if( contain(weapon, "grenade") >= 0 )
 				{
-					// grenade kill (or frostnade)
 					xp += get_pcvar_num(cvar_xp_grenade);
 				}
 			}
@@ -638,7 +673,6 @@ public EventDeathMsg()
 	}
 	else if( IsUserAuthorized(victim) )
 	{
-		// victim died of map causes or killed self
 		new xp = get_pcvar_num(cvar_xp_suicide);
 		
 		g_xp[victim] -= xp;
@@ -796,6 +830,9 @@ public FwdPlayerSpawn(client)
 
 public FwdPlayerDeath(client, killer, shouldgib)
 {
+	// Reset nade refill state on death so it's clean next spawn
+	ResetNadeRefill(client);
+	
 	if( !g_used_revive[client] )
 	{
 		new CsTeams:team = cs_get_user_team(client);
@@ -836,6 +873,114 @@ public FwdPlayerDamage(client, inflictor, attacker, Float:damage, damagebits)
 	}
 }
 
+// =================================================
+// GRENADE THROW HOOKS
+//
+// How refills work:
+//
+// HE Grenade / Smoke Grenade:
+//   - One refill chance per round, per grenade type.
+//   - Triggers the moment you throw your last one (ammo hits 0).
+//   - Max chance: 75%.
+//
+// Flashbangs:
+//   - Two separate chances per round (FL1 and FL2), one per flash slot.
+//   - FL1 triggers after you throw your FIRST flash (regardless of how many you have).
+//   - FL2 triggers after you throw your SECOND flash (or your first, if FL1 already fired).
+//   - This means: with 2 flashes, throw flash 1 -> FL1 chance rolls.
+//     Throw flash 2 -> FL2 chance rolls.
+//   - With only 1 flash: throw it -> FL1 chance rolls. If it gives one back,
+//     throw that -> FL2 chance rolls.
+//   - Each chance fires at most ONCE per round. Max: FL1=75%, FL2=25%.
+// =================================================
+
+public FwdThrowHE(ent)
+{
+	if( !g_nade_enabled[NADE_HE] ) return;
+	
+	new client = pev(ent, pev_owner);
+	if( !is_user_alive(client) ) return;
+	if( cs_get_user_team(client) != CS_TEAM_T ) return;
+	if( !IsUserAuthorized(client) ) return;
+	if( g_nade_refill_used[client][NADE_HE] ) return;
+	if( g_nade_level[client][NADE_HE] <= 0 ) return;
+	
+	if( cs_get_user_bpammo(client, CSW_HEGRENADE) > 0 ) return;
+	
+	g_nade_refill_used[client][NADE_HE] = true;
+	
+	new percent = g_he_chances[g_nade_level[client][NADE_HE] - 1];
+	if( random_num(1, 100) <= percent )
+	{
+		give_item(client, "weapon_hegrenade");
+		Print(client, "Lucky HE refill! (%i%% chance, once per round)", percent);
+	}
+}
+
+public FwdThrowSmoke(ent)
+{
+	if( !g_nade_enabled[NADE_SM] ) return;
+	
+	new client = pev(ent, pev_owner);
+	if( !is_user_alive(client) ) return;
+	if( cs_get_user_team(client) != CS_TEAM_T ) return;
+	if( !IsUserAuthorized(client) ) return;
+	if( g_nade_refill_used[client][NADE_SM] ) return;
+	if( g_nade_level[client][NADE_SM] <= 0 ) return;
+	
+	if( cs_get_user_bpammo(client, CSW_SMOKEGRENADE) > 0 ) return;
+	
+	g_nade_refill_used[client][NADE_SM] = true;
+	
+	new percent = g_sm_chances[g_nade_level[client][NADE_SM] - 1];
+	if( random_num(1, 100) <= percent )
+	{
+		give_item(client, "weapon_smokegrenade");
+		Print(client, "Lucky Smoke refill! (%i%% chance, once per round)", percent);
+	}
+}
+
+public FwdThrowFlash(ent)
+{
+	if( !g_nade_enabled[NADE_FL1] && !g_nade_enabled[NADE_FL2] ) return;
+	
+	new client = pev(ent, pev_owner);
+	if( !is_user_alive(client) ) return;
+	if( cs_get_user_team(client) != CS_TEAM_T ) return;
+	if( !IsUserAuthorized(client) ) return;
+	
+	g_flash_thrown[client]++;
+	
+	if( !g_nade_refill_used[client][NADE_FL1] && g_nade_enabled[NADE_FL1] && g_nade_level[client][NADE_FL1] > 0 )
+	{
+		g_nade_refill_used[client][NADE_FL1] = true;
+		
+		new percent = g_fl1_chances[g_nade_level[client][NADE_FL1] - 1];
+		if( random_num(1, 100) <= percent )
+		{
+			give_item(client, "weapon_flashbang");
+			Print(client, "Lucky Flashbang #1 refill! (%i%%) Throw it for a Flashbang #2 chance!", percent);
+		}
+		else
+		{
+			Print(client, "Flashbang #1 refill missed. (%i%%) Throw your next flash for a Flashbang #2 chance!", percent);
+		}
+	}
+	else if( !g_nade_refill_used[client][NADE_FL2] && g_nade_enabled[NADE_FL2] && g_nade_level[client][NADE_FL2] > 0 )
+	{
+		g_nade_refill_used[client][NADE_FL2] = true;
+		
+		new percent = g_fl2_chances[g_nade_level[client][NADE_FL2] - 1];
+		if( random_num(1, 100) <= percent )
+		{
+			give_item(client, "weapon_flashbang");
+			Print(client, "Lucky Flashbang #2 refill! (%i%% chance, once per round)", percent);
+		}
+	}
+}
+
+// =================================================
+
 public TaskRespawn(client)
 {
 	ExecuteHamB(Ham_CS_RoundRespawn, client);
@@ -869,6 +1014,9 @@ HasTeammateAlive(client, CsTeams:team)
 
 GiveNades(client)
 {
+	// Note: this function handles initial grenade distribution at spawn.
+	// Refills on throw are handled separately by FwdThrowHE/Flash/Smoke.
+	// We do NOT give grenade refills here to avoid double-giving.
 	new CsTeams:team = cs_get_user_team(client);
 	
 	if( team == CS_TEAM_T )
@@ -891,6 +1039,15 @@ GiveNades(client)
 			}
 		}
 	}
+}
+
+ResetNadeRefill(client)
+{
+	for( new i = 0; i < Grenades; i++ )
+	{
+		g_nade_refill_used[client][i] = false;
+	}
+	g_flash_thrown[client] = 0;
 }
 
 ShowMainMenu(client)
@@ -959,8 +1116,11 @@ public MenuMain(client, menu, item)
 			len += format(motd[len], sizeof(motd) - len - 1,	"<tr><td>Survive as a T</td><td>+%i</td></tr>", get_pcvar_num(cvar_xp_survive));
 			len += format(motd[len], sizeof(motd) - len - 1,	"<tr><td>Win Round</td><td>+%i</td></tr>", get_pcvar_num(cvar_xp_win));
 			len += format(motd[len], sizeof(motd) - len - 1,	"</table>");
-			len += format(motd[len], sizeof(motd) - len - 1,	"With these XP points, you can buy upgrades.<br>");
-			len += format(motd[len], sizeof(motd) - len - 1,	"For a list of these upgrades, type /xp again and view the other menus inside.");
+			len += format(motd[len], sizeof(motd) - len - 1,	"<br>Grenade refills: Each grenade type has a ONCE-PER-ROUND lucky refill chance.<br>");
+			len += format(motd[len], sizeof(motd) - len - 1,	"HE and Smoke refill triggers when you throw your last one (max 75%% chance).<br>");
+			len += format(motd[len], sizeof(motd) - len - 1,	"Flashbang #1 triggers after your first throw (max 75%%). ");
+			len += format(motd[len], sizeof(motd) - len - 1,	"Flashbang #2 triggers after your second throw (max 25%%).<br>");
+			len += format(motd[len], sizeof(motd) - len - 1,	"With only 1 flash: throw it for Flashbang #1 chance, then Flashbang #2 if you got one back.<br>");
 			len += format(motd[len], sizeof(motd) - len - 1,	"</p>");
 			len += format(motd[len], sizeof(motd) - len - 1,	"</body>");
 			
@@ -1008,11 +1168,25 @@ ShowGrenadesMenu(client)
 		if( g_nade_enabled[i] )
 		{
 			level = g_nade_level[client][i] + 1;
-			percent = g_nade_max_chance[i] * level / g_nade_maxlevels[i];
+			
+			// Get the chance for the next level from the lookup table
+			switch( i )
+			{
+				case NADE_HE: percent = (level <= MAXLEVEL_GRENADE)    ? g_he_chances[level-1]  : g_he_chances[MAXLEVEL_GRENADE-1];
+				case NADE_FL1: percent = (level <= MAXLEVEL_FLASHBANG_1) ? g_fl1_chances[level-1] : g_fl1_chances[MAXLEVEL_FLASHBANG_1-1];
+				case NADE_FL2: percent = (level <= MAXLEVEL_FLASHBANG_2) ? g_fl2_chances[level-1] : g_fl2_chances[MAXLEVEL_FLASHBANG_2-1];
+				case NADE_SM:  percent = (level <= MAXLEVEL_SMOKEGRENADE) ? g_sm_chances[level-1]  : g_sm_chances[MAXLEVEL_SMOKEGRENADE-1];
+			}
 			
 			if( g_nade_level[client][i] < g_nade_maxlevels[i] )
 			{
-				xp = g_nade_first_xp[i] * (1 << (level - 1));
+				switch( i )
+				{
+					case NADE_HE:  xp = g_he_costs[level-1];
+					case NADE_FL1: xp = g_fl1_costs[level-1];
+					case NADE_FL2: xp = g_fl2_costs[level-1];
+					case NADE_SM:  xp = g_sm_costs[level-1];
+				}
 				formatex(item, sizeof(item) - 1, "%s: \yLevel %i (%i%%) \r[\w%i XP\r]", g_nade_names[i], level, percent, xp);
 			}
 			else
@@ -1047,50 +1221,20 @@ public MenuGrenades(client, menu, item)
 		static motd[2500];
 		new len = formatex(motd, sizeof(motd) - 1,	"<body style=^"background-color:#030303; color:#FF8F00^">");
 		len += format(motd[len], sizeof(motd) - len - 1,	"<p align=^"center^">");
-		len += format(motd[len], sizeof(motd) - len - 1,	"The Grenades ability for the XP Mod is for Terrorists only.<br>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"The Grenades ability contains the HE Grenade, 2 Flashbangs, and Frost Nade.<br>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"These are the grenades you are given when you receive the your items after the hide timer ends.<br>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"Grenade refills are a T-only lucky bonus that triggers ONCE PER ROUND per grenade type.<br>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"HE Grenade: triggers when you throw your last HE. Chances per level: 5/10/15/20/30/40/50%%.<br>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"Frost Nade: triggers when you throw your last Smoke. Chances per level: 5/10/15/20%%.<br>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"Flashbang #1: triggers after your FIRST flash throw. Chances per level: 5/10/15/20%%.<br>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"Flashbang #2: triggers after your SECOND flash throw. Chances per level: 5/10/15%%.<br>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"If you only have 1 flash: throw it -> FL1 fires. If you get one back, throw it -> FL2 fires.<br>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"Each refill chance fires at most ONCE per round. <br>");
 		len += format(motd[len], sizeof(motd) - len - 1,	"<br>");
 		len += format(motd[len], sizeof(motd) - len - 1,	"<table>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"<tr>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"<th></th>");
-		for( new i = 0; i < Grenades; i++ )
-		{
-			if( g_nade_enabled[i] )
-			{
-				len += format(motd[len], sizeof(motd) - len - 1,	"<th>%s</th>", g_nade_names[i]);
-			}
-		}
-		len += format(motd[len], sizeof(motd) - len - 1,	"</tr>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"<tr>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"<th>Chance Intervals</th>");
-		for( new i = 0; i < Grenades; i++ )
-		{
-			if( g_nade_enabled[i] )
-			{
-				len += format(motd[len], sizeof(motd) - len - 1,	"<td>%i%%</td>", (g_nade_max_chance[i] / g_nade_maxlevels[i]));
-			}
-		}
-		len += format(motd[len], sizeof(motd) - len - 1,	"</tr>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"<tr>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"<th>Max Level</th>");
-		for( new i = 0; i < Grenades; i++ )
-		{
-			if( g_nade_enabled[i] )
-			{
-				len += format(motd[len], sizeof(motd) - len - 1,	"<td>%i</td>", g_nade_maxlevels[i]);
-			}
-		}
-		len += format(motd[len], sizeof(motd) - len - 1,	"</tr>");
-		len += format(motd[len], sizeof(motd) - len - 1,	"<th>Max Chance</th>");
-		for( new i = 0; i < Grenades; i++ )
-		{
-			if( g_nade_enabled[i] )
-			{
-				len += format(motd[len], sizeof(motd) - len - 1,	"<td>%i%%</td>", g_nade_max_chance[i]);
-			}
-		}
-		len += format(motd[len], sizeof(motd) - len - 1,	"</tr>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"<tr><th>Grenade</th><th>Levels</th><th>Max Chance</th><th>Cost Range</th></tr>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"<tr><td>HE Grenade</td><td>7</td><td>50%%</td><td>200 - 7000 XP</td></tr>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"<tr><td>Flashbang #1</td><td>4</td><td>20%%</td><td>100 - 1000 XP</td></tr>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"<tr><td>Flashbang #2</td><td>3</td><td>15%%</td><td>300 - 800 XP</td></tr>");
+		len += format(motd[len], sizeof(motd) - len - 1,	"<tr><td>Frost Nade</td><td>4</td><td>20%%</td><td>500 - 2000 XP</td></tr>");
 		len += format(motd[len], sizeof(motd) - len - 1,	"</table>");
 		len += format(motd[len], sizeof(motd) - len - 1,	"</p>");
 		len += format(motd[len], sizeof(motd) - len - 1,	"</body>");
@@ -1102,8 +1246,22 @@ public MenuGrenades(client, menu, item)
 		new upgrade = str_to_num(info);
 		
 		new level = g_nade_level[client][upgrade] + 1;
-		new xp = g_nade_first_xp[upgrade] * (1 << (level - 1));
-		new percent = g_nade_max_chance[upgrade] * level / g_nade_maxlevels[upgrade];
+		new xp;
+		switch( upgrade )
+		{
+			case NADE_HE:  xp = g_he_costs[level-1];
+			case NADE_FL1: xp = g_fl1_costs[level-1];
+			case NADE_FL2: xp = g_fl2_costs[level-1];
+			case NADE_SM:  xp = g_sm_costs[level-1];
+		}
+		new percent;
+		switch( upgrade )
+		{
+			case NADE_HE:  percent = g_he_chances[level-1];
+			case NADE_FL1: percent = g_fl1_chances[level-1];
+			case NADE_FL2: percent = g_fl2_chances[level-1];
+			case NADE_SM:  percent = g_sm_chances[level-1];
+		}
 		
 		g_xp[client] -= xp;
 		g_nade_level[client][upgrade] = level;
@@ -1129,7 +1287,14 @@ public CallbackGrenades(client, menu, item)
 		return ITEM_DISABLED;
 	}
 	
-	new xp = g_nade_first_xp[upgrade] * (1 << g_nade_level[client][upgrade]);
+	new xp;
+	switch( upgrade )
+	{
+		case NADE_HE:  xp = g_he_costs[g_nade_level[client][upgrade]];
+		case NADE_FL1: xp = g_fl1_costs[g_nade_level[client][upgrade]];
+		case NADE_FL2: xp = g_fl2_costs[g_nade_level[client][upgrade]];
+		case NADE_SM:  xp = g_sm_costs[g_nade_level[client][upgrade]];
+	}
 	if( g_xp[client] < xp )
 	{
 		return ITEM_DISABLED;
@@ -2030,6 +2195,3 @@ public QuerySaveData(failstate, Handle:query, error[], errnum, data[], size, Flo
 	}
 }
 #endif
-/* AMXX-Studio Notes - DO NOT MODIFY BELOW HERE
-*{\\ rtf1\\ ansi\\ deff0{\\ fonttbl{\\ f0\\ fnil Tahoma;}}\n\\ viewkind4\\ uc1\\ pard\\ lang11274\\ f0\\ fs16 \n\\ par }
-*/
