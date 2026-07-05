@@ -37,29 +37,6 @@ new const g_start_classname[] =			"BCM_TeleportStart";
 new const g_destination_classname[] =		"BCM_TeleportDestination";
 new const g_light_classname[] =			"BCM_Light";
 
-new const g_model_platform[] =			"models/ExecuteGaming/Normal/Platform.mdl";
-new const g_model_bunnyhop[] =			"models/ExecuteGaming/Normal/Bunnyhop.mdl";
-new const g_model_damage[] =			"models/ExecuteGaming/Normal/Damage.mdl";
-new const g_model_healer[] =			"models/ExecuteGaming/Normal/Healer.mdl";
-new const g_model_no_fall_damage[] =		"models/ExecuteGaming/Normal/NoFallDamage.mdl";
-new const g_model_ice[] =			"models/ExecuteGaming/Normal/Ice.mdl";
-new const g_model_trampoline[] =			"models/ExecuteGaming/Normal/Trampoline.mdl";
-new const g_model_speed_boost[] =		"models/ExecuteGaming/Normal/SpeedBoost.mdl";
-new const g_model_death[] =			"models/ExecuteGaming/Normal/Death.mdl";
-new const g_model_low_gravity[] =		"models/ExecuteGaming/Normal/LowGravity.mdl";
-new const g_model_slap[] =			"models/ExecuteGaming/Normal/Slap.mdl";
-new const g_model_honey[] =			"models/ExecuteGaming/Normal/Honey.mdl";
-new const g_model_ct_barrier[] =			"models/ExecuteGaming/Normal/CT_Barrier.mdl";
-new const g_model_t_barrier[] =			"models/ExecuteGaming/Normal/T_Barrier.mdl";
-new const g_model_glass[] =			"models/ExecuteGaming/Normal/Glass.mdl";
-new const g_model_no_slow_down_bunnyhop[] =	"models/ExecuteGaming/Normal/NoSlowDown_Bunnyhop.mdl";
-new const g_model_delayed_bunnyhop[] =		"models/ExecuteGaming/Normal/Delayed_Bunnyhop.mdl";
-new const g_model_invincibility[] =		"models/ExecuteGaming/Normal/Invincibility.mdl";
-new const g_model_stealth[] =			"models/ExecuteGaming/Normal/Stealth.mdl";
-new const g_model_boots_of_speed[] =		"models/ExecuteGaming/Normal/BootsOfSpeed.mdl";
-new const g_model_xpblock[] =			"models/ExecuteGaming/Normal/xpblock.mdl";
-new const g_model_moneygiver[] =		"models/ExecuteGaming/Normal/moneygiver.mdl";
-
 new const g_sprite_light[] =			"sprites/ExecuteGaming/Light.spr";
 
 new const g_sprite_teleport_start[] =		"sprites/ExecuteGaming/Teleport_Start.spr";
@@ -528,53 +505,50 @@ new const g_block_save_ids[TOTAL_BLOCKS] =
 	'V'
 };
 
-new g_block_models[TOTAL_BLOCKS][256];
+new const g_block_model_names[TOTAL_BLOCKS][] =
+{
+	"Platform",
+	"Bunnyhop",
+	"Damage",
+	"Healer",
+	"NoFallDamage",
+	"Ice",
+	"Trampoline",
+	"SpeedBoost",
+	"Death",
+	"LowGravity",
+	"Slap",
+	"Honey",
+	"CT_Barrier",
+	"T_Barrier",
+	"Glass",
+	"NoSlowDown_Bunnyhop",
+	"Delayed_Bunnyhop",
+	"Invincibility",
+	"Stealth",
+	"BootsOfSpeed",
+	"xpblock",
+	"moneygiver"
+};
 
 new g_block_selection_pages_max;
 
 public plugin_precache()
 {
-	g_block_models[PLATFORM] =		g_model_platform;
-	g_block_models[BUNNYHOP] =		g_model_bunnyhop;
-	g_block_models[DAMAGE] =		g_model_damage;
-	g_block_models[HEALER] =		g_model_healer;
-	g_block_models[NO_FALL_DAMAGE] =	g_model_no_fall_damage;
-	g_block_models[ICE] =			g_model_ice;
-	g_block_models[TRAMPOLINE] =		g_model_trampoline;
-	g_block_models[SPEED_BOOST] =		g_model_speed_boost;
-	g_block_models[DEATH] =			g_model_death;
-	g_block_models[LOW_GRAVITY] =		g_model_low_gravity;
-	g_block_models[SLAP] =			g_model_slap;
-	g_block_models[HONEY] =			g_model_honey;
-	g_block_models[CT_BARRIER] =		g_model_ct_barrier;
-	g_block_models[T_BARRIER] =		g_model_t_barrier;
-	g_block_models[GLASS] =			g_model_glass;
-	g_block_models[NO_SLOW_DOWN_BUNNYHOP] =	g_model_no_slow_down_bunnyhop;
-	g_block_models[DELAYED_BUNNYHOP] =	g_model_delayed_bunnyhop;
-	g_block_models[INVINCIBILITY] =		g_model_invincibility;
-	g_block_models[STEALTH] =		g_model_stealth;
-	g_block_models[BOOTS_OF_SPEED] =	g_model_boots_of_speed;
-	g_block_models[XPBLOCK] =		g_model_xpblock;
-	g_block_models[MONEYGIVER] =		g_model_moneygiver;
+	new const SIZES[][] = { "Normal", "Tiny", "Large", "Pole" };
+	new block_model[256];
+	for ( new i = 0; i < TOTAL_BLOCKS; ++i )
+	{
+		for ( new s = 0; s < sizeof(SIZES); ++s )
+		{
+			GetBlockModel(block_model, i, SIZES[s]);
+			precache_model(block_model);
+		}
+	}
 	
 	SetupBlockRendering(GLASS, TRANSWHITE, 255, 255, 255, 100);
 	SetupBlockRendering(INVINCIBILITY, GLOWSHELL, 255, 255, 255, 16);
 	SetupBlockRendering(STEALTH, TRANSWHITE, 255, 255, 255, 100);
-	
-	new block_model[256];
-	for ( new i = 0; i < TOTAL_BLOCKS; ++i )
-	{
-		precache_model(g_block_models[i]);
-		
-		SetBlockModelName(block_model, g_block_models[i], "Tiny");
-		precache_model(block_model);
-		
-		SetBlockModelName(block_model, g_block_models[i], "Large");
-		precache_model(block_model);
-		
-		SetBlockModelName(block_model, g_block_models[i], "Pole");
-		precache_model(block_model);
-	}
 	
 	precache_model(g_sprite_light);
 	
@@ -858,10 +832,9 @@ SetupBlockRendering(block_type, render_type, red, green, blue, alpha)
 	g_alpha[block_type] =		alpha;
 }
 
-SetBlockModelName(model_target[256], model_source[256], const new_name[])
+GetBlockModel(model_out[256], block_type, const size_name[])
 {
-	model_target = model_source;
-	replace(model_target, charsmax(model_target), "Normal", new_name);
+	formatex(model_out, charsmax(model_out), "models/ExecuteGaming/%s/%s.mdl", size_name, g_block_model_names[block_type]);
 }
 
 public FwdPlayerSpawn(id)
@@ -3579,26 +3552,10 @@ CreateBlock(const id, const block_type, Float:origin[3], const axis, const size,
 	
 	switch ( size )
 	{
-		case TINY:
-		{
-			SetBlockModelName(block_model, g_block_models[block_type], "Tiny");
-			scale = 0.25;
-		}
-		case NORMAL:
-		{
-			block_model = g_block_models[block_type];
-			scale = 1.0;
-		}
-		case LARGE:
-		{
-			SetBlockModelName(block_model, g_block_models[block_type], "Large");
-			scale = 2.0;
-		}
-		case POLE:
-		{
-			SetBlockModelName(block_model, g_block_models[block_type], "Pole");
-			scale = 1.0;
-		}
+		case TINY:	{ GetBlockModel(block_model, block_type, "Tiny");   scale = 0.25; }
+		case NORMAL:	{ GetBlockModel(block_model, block_type, "Normal"); scale = 1.0;  }
+		case LARGE:	{ GetBlockModel(block_model, block_type, "Large");  scale = 2.0;  }
+		case POLE:	{ GetBlockModel(block_model, block_type, "Pole");   scale = 1.0;  }
 	}
 	
 	for ( new i = 0; i < 3; ++i )
