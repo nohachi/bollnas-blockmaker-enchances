@@ -248,7 +248,8 @@ enum
 {
 	NORMAL,
 	TINY,
-	LARGE
+	LARGE,
+	POLE
 };
 
 enum
@@ -569,6 +570,9 @@ public plugin_precache()
 		precache_model(block_model);
 		
 		SetBlockModelName(block_model, g_block_models[i], "Large");
+		precache_model(block_model);
+		
+		SetBlockModelName(block_model, g_block_models[i], "Pole");
 		precache_model(block_model);
 	}
 	
@@ -2199,6 +2203,7 @@ ShowBlockMenu(id)
 		case TINY:	size = "Tiny";
 		case NORMAL:	size = "Normal";
 		case LARGE:	size = "Large";
+		case POLE:	size = "Pole";
 	}
 	
 	format(menu, charsmax(menu),\
@@ -3589,6 +3594,11 @@ CreateBlock(const id, const block_type, Float:origin[3], const axis, const size,
 			SetBlockModelName(block_model, g_block_models[block_type], "Large");
 			scale = 2.0;
 		}
+		case POLE:
+		{
+			SetBlockModelName(block_model, g_block_models[block_type], "Pole");
+			scale = 1.0;
+		}
 	}
 	
 	for ( new i = 0; i < 3; ++i )
@@ -3611,6 +3621,7 @@ CreateBlock(const id, const block_type, Float:origin[3], const axis, const size,
 	entity_set_vector(ent, EV_VEC_angles, angles);
 	entity_set_size(ent, size_min, size_max);
 	entity_set_int(ent, EV_INT_body, block_type);
+	entity_set_int(ent, EV_INT_skin, size);
 	
 	if ( 1 <= id <= g_max_players )
 	{
@@ -3734,13 +3745,9 @@ ConvertBlock(id, ent, const convert_to, const bool:preserve_size)
 	
 	if ( preserve_size )
 	{
-		static size, Float:max_size;
+		static size;
 		
-		max_size = size_max[0] + size_max[1] + size_max[2];
-		
-		if ( max_size > 128.0 )		size = LARGE;
-		else if ( max_size > 64.0 )	size = NORMAL;
-		else				size = TINY;
+		size = entity_get_int(ent, EV_INT_skin);
 		
 		return CreateBlock(id, convert_to, origin, axis, size, property1, property2, property3, property4);
 	}
@@ -3899,7 +3906,8 @@ ChangeBlockSize(id)
 	{
 		case TINY:	g_selected_block_size[id] = NORMAL;
 		case NORMAL:	g_selected_block_size[id] = LARGE;
-		case LARGE:	g_selected_block_size[id] = TINY;
+		case LARGE:	g_selected_block_size[id] = POLE;
+		case POLE:	g_selected_block_size[id] = TINY;
 	}
 }
 
@@ -4185,18 +4193,13 @@ CopyBlock(ent)
 	new Float:angles[3];
 	new Float:size_min[3];
 	new Float:size_max[3];
-	new Float:max_size;
 	
 	entity_get_vector(ent, EV_VEC_origin, origin);
 	entity_get_vector(ent, EV_VEC_angles, angles);
 	entity_get_vector(ent, EV_VEC_mins, size_min);
 	entity_get_vector(ent, EV_VEC_maxs, size_max);
 	
-	max_size = size_max[0] + size_max[1] + size_max[2];
-	
-	if ( max_size > 128.0 )		size = LARGE;
-	else if ( max_size > 64.0 )	size = NORMAL;
-	else				size = TINY;
+	size = entity_get_int(ent, EV_INT_skin);
 	
 	for ( new i = 0; i < 3; ++i )
 	{
@@ -5109,8 +5112,6 @@ SaveBlocks(id)
 	new Float:angles[3];
 	new Float:tele_start[3];
 	new Float:tele_end[3];
-	new Float:max_size;
-	new Float:size_max[3];
 	
 	file = fopen(g_file, "wt");
 	
@@ -5123,7 +5124,6 @@ SaveBlocks(id)
 		block_type = entity_get_int(ent, EV_INT_body);
 		entity_get_vector(ent, EV_VEC_origin, origin);
 		entity_get_vector(ent, EV_VEC_angles, angles);
-		entity_get_vector(ent, EV_VEC_maxs, size_max);
 		
 		GetProperty(ent, 1, property1);
 		GetProperty(ent, 2, property2);
@@ -5135,11 +5135,7 @@ SaveBlocks(id)
 		if ( !property3[0] ) copy(property3, charsmax(property3), "/");
 		if ( !property4[0] ) copy(property4, charsmax(property4), "/");
 		
-		max_size = size_max[0] + size_max[1] + size_max[2];
-		
-		if ( max_size > 128.0 )		size = LARGE;
-		else if ( max_size > 64.0 )	size = NORMAL;
-		else				size = TINY;
+		size = entity_get_int(ent, EV_INT_skin);
 		
 		formatex(data, charsmax(data), "%c %f %f %f %f %f %f %d %s %s %s %s^n",\
 			g_block_save_ids[block_type],\
