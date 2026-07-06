@@ -3568,19 +3568,53 @@ CreateBlock(const id, const block_type, Float:origin[3], const axis, const size,
 		case TINY:	{ GetBlockModel(block_model, block_type, "Tiny");   scale = 0.25; }
 		case NORMAL:	{ GetBlockModel(block_model, block_type, "Normal"); scale = 1.0;  }
 		case LARGE:	{ GetBlockModel(block_model, block_type, "Large");  scale = 2.0;  }
-		case POLE:	{ GetBlockModel(block_model, block_type, "Pole");   scale = 1.0;  }
+		case POLE:
+		{
+			GetBlockModel(block_model, block_type, "Pole");
+			scale = 1.0;
+			
+			// Pole is a narrow column (±4, ±4 cross-section, ±32 long axis).
+			// Override the slab bbox set above with the correct pole bbox per axis.
+			switch ( axis )
+			{
+				case X:
+				{
+					// Long axis along X
+					size_min[0] = -32.0; size_min[1] = -4.0; size_min[2] = -4.0;
+					size_max[0] =  32.0; size_max[1] =  4.0; size_max[2] =  4.0;
+					angles[0] = 90.0; angles[1] = 0.0; angles[2] = 0.0;
+				}
+				case Y:
+				{
+					// Long axis along Y
+					size_min[0] = -4.0; size_min[1] = -32.0; size_min[2] = -4.0;
+					size_max[0] =  4.0; size_max[1] =  32.0; size_max[2] =  4.0;
+					angles[0] = 90.0; angles[1] = 0.0; angles[2] = 90.0;
+				}
+				case Z:
+				{
+					// Long axis along Z (default vertical pole)
+					size_min[0] = -4.0; size_min[1] = -4.0; size_min[2] = -32.0;
+					size_max[0] =  4.0; size_max[1] =  4.0; size_max[2] =  32.0;
+					angles[0] = 0.0; angles[1] = 0.0; angles[2] = 0.0;
+				}
+			}
+		}
 	}
 	
-	for ( new i = 0; i < 3; ++i )
+	if ( size != POLE )
 	{
-		if ( size_min[i] != 4.0 && size_min[i] != -4.0 )
+		for ( new i = 0; i < 3; ++i )
 		{
-			size_min[i] *= scale;
-		}
-		
-		if ( size_max[i] != 4.0 && size_max[i] != -4.0 )
-		{
-			size_max[i] *= scale;
+			if ( size_min[i] != 4.0 && size_min[i] != -4.0 )
+			{
+				size_min[i] *= scale;
+			}
+			
+			if ( size_max[i] != 4.0 && size_max[i] != -4.0 )
+			{
+				size_max[i] *= scale;
+			}
 		}
 	}
 	
@@ -3838,31 +3872,63 @@ RotateBlock(ent)
 	entity_get_vector(ent, EV_VEC_mins, size_min);
 	entity_get_vector(ent, EV_VEC_maxs, size_max);
 	
-	if ( angles[0] == 0.0 && angles[2] == 0.0 )
+	new size = entity_get_int(ent, EV_INT_skin);
+	
+	if ( size == POLE )
 	{
-		angles[0] = 90.0;
-	}
-	else if ( angles[0] == 90.0 && angles[2] == 0.0 )
-	{
-		angles[0] = 90.0;
-		angles[2] = 90.0;
+		// Pole rotation cycles: Z (vertical) -> X (horizontal X) -> Y (horizontal Y) -> Z
+		// Detect current axis by which dimension is ±32 (the long axis)
+		if ( size_max[2] > size_max[0] )
+		{
+			// Currently Z axis (vertical) -> rotate to X axis
+			angles[0] = 90.0; angles[1] = 0.0; angles[2] = 0.0;
+			size_min[0] = -32.0; size_min[1] = -4.0; size_min[2] = -4.0;
+			size_max[0] =  32.0; size_max[1] =  4.0; size_max[2] =  4.0;
+		}
+		else if ( size_max[0] > size_max[1] )
+		{
+			// Currently X axis -> rotate to Y axis
+			angles[0] = 90.0; angles[1] = 0.0; angles[2] = 90.0;
+			size_min[0] = -4.0; size_min[1] = -32.0; size_min[2] = -4.0;
+			size_max[0] =  4.0; size_max[1] =  32.0; size_max[2] =  4.0;
+		}
+		else
+		{
+			// Currently Y axis -> rotate back to Z axis (vertical)
+			angles[0] = 0.0; angles[1] = 0.0; angles[2] = 0.0;
+			size_min[0] = -4.0; size_min[1] = -4.0; size_min[2] = -32.0;
+			size_max[0] =  4.0; size_max[1] =  4.0; size_max[2] =  32.0;
+		}
 	}
 	else
 	{
-		angles[0] = 0.0;
-		angles[1] = 0.0;
-		angles[2] = 0.0;
+		// Slab rotation: cycle through 3 orientations using angle state
+		if ( angles[0] == 0.0 && angles[2] == 0.0 )
+		{
+			angles[0] = 90.0;
+		}
+		else if ( angles[0] == 90.0 && angles[2] == 0.0 )
+		{
+			angles[0] = 90.0;
+			angles[2] = 90.0;
+		}
+		else
+		{
+			angles[0] = 0.0;
+			angles[1] = 0.0;
+			angles[2] = 0.0;
+		}
+		
+		temp = size_min[0];
+		size_min[0] = size_min[2];
+		size_min[2] = size_min[1];
+		size_min[1] = temp;
+		
+		temp = size_max[0];
+		size_max[0] = size_max[2];
+		size_max[2] = size_max[1];
+		size_max[1] = temp;
 	}
-	
-	temp = size_min[0];
-	size_min[0] = size_min[2];
-	size_min[2] = size_min[1];
-	size_min[1] = temp;
-	
-	temp = size_max[0];
-	size_max[0] = size_max[2];
-	size_max[2] = size_max[1];
-	size_max[1] = temp;
 	
 	entity_set_vector(ent, EV_VEC_angles, angles);
 	entity_set_size(ent, size_min, size_max);
