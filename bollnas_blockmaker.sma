@@ -150,6 +150,10 @@ new bool:g_all_godmode;
 new bool:g_has_checkpoint[33];
 new bool:g_checkpoint_duck[33];
 new bool:g_reseted[33];
+new bool:g_autosave_enabled;
+
+#define AUTOSAVE_INTERVAL	10.0
+#define TASK_AUTOSAVE		9001
 
 new g_selected_block_size[33];
 new g_choice_option[33];
@@ -801,8 +805,9 @@ CreateMenus()
 	add(g_options_menu, size, "%s5. %sDelete All^n");
 	add(g_options_menu, size, "%s6. %sSave^n");
 	add(g_options_menu, size, "%s7. %sLoad^n^n");
+	add(g_options_menu, size, "%s8. %sAuto Save: %s^n^n");
 	add(g_options_menu, size, "\r0. \wBack");
-	g_keys_options_menu =		B1 | B2 | B3 | B4 | B5 | B6 | B7 | B0;
+	g_keys_options_menu =		B1 | B2 | B3 | B4 | B5 | B6 | B7 | B8 | B0;
 	
 	size = charsmax(g_choice_menu);
 	add(g_choice_menu, size, "\y%s^n^n");
@@ -2488,7 +2493,10 @@ ShowOptionsMenu(id)
 		col3,\
 		col4,\
 		col3,\
-		col4
+		col4,\
+		col3,\
+		col4,\
+		g_autosave_enabled ? "\yOn" : "\rOff"\
 		);
 	
 	show_menu(id, g_keys_options_menu, menu, -1, "BcmOptionsMenu");
@@ -2930,6 +2938,11 @@ public HandleOptionsMenu(id, key)
 		case K7:
 		{
 			if ( g_admin[id] )	ShowChoiceMenu(id, CHOICE_LOAD, "Loading will delete all blocks and teleports, do you want to continue?");
+			else			ShowOptionsMenu(id);
+		}
+		case K8:
+		{
+			if ( g_admin[id] )	ToggleAutosave(id);
 			else			ShowOptionsMenu(id);
 		}
 		case K0: ShowMainMenu(id);
@@ -5047,6 +5060,40 @@ DeleteAll(id, bool:notify)
 	return PLUGIN_HANDLED;
 }
 
+ToggleAutosave(id)
+{
+	g_autosave_enabled = !g_autosave_enabled;
+	
+	if ( g_autosave_enabled )
+	{
+		set_task(AUTOSAVE_INTERVAL, "TaskAutosave", TASK_AUTOSAVE, _, _, "b");
+		BCM_Print(id, "Auto Save enabled. The map will be saved every^1 %.0f seconds^3.", AUTOSAVE_INTERVAL);
+	}
+	else
+	{
+		remove_task(TASK_AUTOSAVE);
+		BCM_Print(id, "Auto Save disabled.");
+	}
+}
+
+public TaskAutosave()
+{
+	new block_count, tele_count, light_count;
+	DoSave(block_count, tele_count, light_count);
+	
+	for ( new i = 1; i <= g_max_players; ++i )
+	{
+		if ( g_connected[i] && ( g_admin[i] || g_gived_access[i] ) )
+		{
+			BCM_Print(i, "^3[Auto Save]^1 %d block%s^3,^1 %d teleport%s^3 and^1 %d light%s^3 saved automatically. Total entities:^1 %d",\
+				block_count, block_count == 1 ? g_blank : "s",\
+				tele_count, tele_count == 1 ? g_blank : "s",\
+				light_count, light_count == 1 ? g_blank : "s",\
+				entity_count());
+		}
+	}
+}
+
 SaveBlocks(id)
 {
 	if ( !g_admin[id] )
@@ -5055,12 +5102,33 @@ SaveBlocks(id)
 		return PLUGIN_HANDLED;
 	}
 	
+	new block_count, tele_count, light_count;
+	DoSave(block_count, tele_count, light_count);
+	
+	static name[32];
+	get_user_name(id, name, charsmax(name));
+	
+	for ( new i = 1; i <= g_max_players; ++i )
+	{
+		if ( g_connected[i] && ( g_admin[i] || g_gived_access[i] ) )
+		{
+			BCM_Print(i, "^1%s^3 saved^1 %d block%s^3,^1 %d teleport%s^3 and^1 %d light%s^3! Total entites in map:^1 %d",\
+				name,\
+				block_count, block_count == 1 ? g_blank : "s",\
+				tele_count, tele_count == 1 ? g_blank : "s",\
+				light_count, light_count == 1 ? g_blank : "s",\
+				entity_count());
+		}
+	}
+	
+	return PLUGIN_HANDLED;
+}
+
+DoSave(&block_count, &tele_count, &light_count)
+{
 	new ent;
 	new file;
 	new data[128];
-	new block_count;
-	new tele_count;
-	new light_count;
 	new block_type;
 	new size;
 	new property1[5], property2[5], property3[5], property4[5];
@@ -5074,6 +5142,7 @@ SaveBlocks(id)
 	
 	block_count = 0;
 	tele_count = 0;
+	light_count = 0;
 	
 	ent = -1;
 	while ( ( ent = find_ent_by_class(ent, g_block_classname) ) )
@@ -5160,20 +5229,7 @@ SaveBlocks(id)
 		++light_count;
 	}
 	
-	static name[32];
-	get_user_name(id, name, charsmax(name));
-	
-	for ( new i = 1; i <= g_max_players; ++i )
-	{
-		if ( g_connected[i]
-		&& ( g_admin[i] || g_gived_access[i] ) )
-		{
-			BCM_Print(i, "^1%s^3 saved^1 %d block%s^3,^1 %d teleport%s^3 and^1 %d light%s^3! Total entites in map:^1 %d", name, block_count, block_count == 1 ? g_blank : "s", tele_count, tele_count == 1 ? g_blank : "s", light_count, light_count == 1 ? g_blank : "s", entity_count());
-		}
-	}
-	
 	fclose(file);
-	return PLUGIN_HANDLED;
 }
 
 LoadBlocks(id)
