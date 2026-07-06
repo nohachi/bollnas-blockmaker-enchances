@@ -50,6 +50,11 @@ new g_sprite_beam;
 new g_xpblock_count[32];
 new g_moneygiver_count[32];
 
+// Per-player per-gun-block cooldown timers. Indexed by (gun_block_type - GUN_HE).
+// Value is the gametime at which the player can use that block type again.
+// 0.0 means the block is available (no cooldown active).
+new Float:g_gunblock_next_use[33][7];
+
 enum ( <<= 1 )
 {
 	B1 = 1,
@@ -215,6 +220,13 @@ enum
 	BOOTS_OF_SPEED,
 	XPBLOCK,
 	MONEYGIVER,
+	GUN_HE,
+	GUN_FLASH,
+	GUN_SMOKE,
+	GUN_DEAGLE,
+	GUN_SCOUT,
+	GUN_USP,
+	GUN_AK47,
 	
 	TOTAL_BLOCKS
 };
@@ -272,7 +284,14 @@ new const g_block_names[TOTAL_BLOCKS][] =
 	"Stealth",
 	"Boots Of Speed",
 	"XP Block",
-	"Money Giver"
+	"Money Giver",
+	"HE Grenade",
+	"Flashbang",
+	"Smoke Grenade",
+	"Deagle",
+	"Scout",
+	"USP",
+	"AK47"
 };
 
 new const g_property1_name[TOTAL_BLOCKS][] =
@@ -298,7 +317,14 @@ new const g_property1_name[TOTAL_BLOCKS][] =
 	"Stealth Time",
 	"Boots Of Speed Time",
 	"XP To Give",
-	"Money Amount"
+	"Money Amount",
+	"Bullets",
+	"Bullets",
+	"Bullets",
+	"Bullets",
+	"Bullets",
+	"Bullets",
+	"Bullets"
 };
 
 new const g_property1_default_value[TOTAL_BLOCKS][] =
@@ -324,7 +350,14 @@ new const g_property1_default_value[TOTAL_BLOCKS][] =
 	"10",
 	"10",
 	"50",
-	"500"
+	"500",
+	"1",
+	"1",
+	"1",
+	"1",
+	"1",
+	"1",
+	"1"
 };
 
 new const g_property2_name[TOTAL_BLOCKS][] =
@@ -350,7 +383,14 @@ new const g_property2_name[TOTAL_BLOCKS][] =
 	"Delay After Usage",
 	"Delay After Usage",
 	"",
-	""
+	"",
+	"Reset Time",
+	"Reset Time",
+	"Reset Time",
+	"Reset Time",
+	"Reset Time",
+	"Reset Time",
+	"Reset Time"
 };
 
 new const g_property2_default_value[TOTAL_BLOCKS][] =
@@ -376,7 +416,14 @@ new const g_property2_default_value[TOTAL_BLOCKS][] =
 	"60",
 	"60",
 	"",
-	""
+	"",
+	"0",
+	"0",
+	"0",
+	"0",
+	"0",
+	"0",
+	"0"
 };
 
 new const g_property3_name[TOTAL_BLOCKS][] =
@@ -402,7 +449,14 @@ new const g_property3_name[TOTAL_BLOCKS][] =
 	"",
 	"Speed",
 	"Transparency",
-	""
+	"",
+	"Transparency",
+	"Transparency",
+	"Transparency",
+	"Transparency",
+	"Transparency",
+	"Transparency",
+	"Transparency"
 };
 
 new const g_property3_default_value[TOTAL_BLOCKS][] =
@@ -428,7 +482,14 @@ new const g_property3_default_value[TOTAL_BLOCKS][] =
 	"",
 	"400",
 	"255",
-	""
+	"",
+	"255",
+	"255",
+	"255",
+	"255",
+	"255",
+	"255",
+	"255"
 };
 
 new const g_property4_name[TOTAL_BLOCKS][] =
@@ -448,6 +509,13 @@ new const g_property4_name[TOTAL_BLOCKS][] =
 	"On Top Only",
 	"On Top Only",
 	"",
+	"On Top Only",
+	"On Top Only",
+	"On Top Only",
+	"On Top Only",
+	"On Top Only",
+	"On Top Only",
+	"On Top Only",
 	"On Top Only",
 	"On Top Only",
 	"On Top Only",
@@ -480,6 +548,13 @@ new const g_property4_default_value[TOTAL_BLOCKS][] =
 	"1",
 	"1",
 	"1",
+	"1",
+	"1",
+	"1",
+	"1",
+	"1",
+	"1",
+	"1",
 	"1"
 };
 
@@ -506,7 +581,14 @@ new const g_block_save_ids[TOTAL_BLOCKS] =
 	'S',
 	'T',
 	'U',
-	'V'
+	'V',
+	'W',
+	'X',
+	'Y',
+	'Z',
+	'a',
+	'b',
+	'c'
 };
 
 new const g_block_model_names[TOTAL_BLOCKS][] =
@@ -532,7 +614,14 @@ new const g_block_model_names[TOTAL_BLOCKS][] =
 	"Stealth",
 	"BootsOfSpeed",
 	"xpblock",
-	"moneygiver"
+	"moneygiver",
+	"HE",
+	"Flash",
+	"Smoke",
+	"Deagle",
+	"Scout",
+	"USP",
+	"AK47"
 };
 
 new g_block_selection_pages_max;
@@ -633,6 +722,10 @@ public plugin_init()
 	register_think(g_light_classname,		"LightThink");
 	
 	register_event("CurWeapon",			"EventCurWeapon",	"be");
+	// HLTV event with these filters fires at the very start of every new round
+	// (during freeze time, before Round_Start). Standard AMXX pattern for
+	// detecting round start reliably; fires regardless of whether HLTV is in use.
+	register_event("HLTV",				"EventNewRound",	"a", "1=0", "2=0");
 	
 	register_message(get_user_msgid("StatusValue"),	"MsgStatusValue");
 	
@@ -1106,6 +1199,7 @@ public pfn_touch(ent, id)
 			case BOOTS_OF_SPEED:			ActionBootsOfSpeed(id, ent);
 			case XPBLOCK:				ActionXPBlock(id, ent);
 			case MONEYGIVER:			ActionMoneyGiver(id, ent);
+			case GUN_HE, GUN_FLASH, GUN_SMOKE, GUN_DEAGLE, GUN_SCOUT, GUN_USP, GUN_AK47:	ActionGunBlock(id, ent, block_type);
 		}
 	}
 	
@@ -1583,6 +1677,202 @@ ActionBootsOfSpeed(id, ent)
 	g_boots_of_speed_next_use[id] = gametime + time_out + str_to_float(property);
 	
 	return PLUGIN_HANDLED;
+}
+
+public EventNewRound()
+{
+	// Reset gun block cooldowns for all players at round start.
+	// This handles the "Reset Time = 0" case (reset on next round) — after
+	// EventNewRound fires, any cooldown from last round is cleared.
+	// Cooldowns > 0 also get cleared here (rounds are the natural boundary
+	// for these blocks; long cross-round cooldowns aren't the intent).
+	for ( new id = 1; id <= g_max_players; id++ )
+	{
+		for ( new i = 0; i < 7; i++ )
+		{
+			g_gunblock_next_use[id][i] = 0.0;
+		}
+	}
+}
+
+// Maps a gun block type to the CS weapon and ammo type it gives.
+GetGunBlockWeaponInfo(block_type, &weapon_id, &ammo_id, weapon_classname[32])
+{
+	switch ( block_type )
+	{
+		case GUN_HE:
+		{
+			weapon_id = CSW_HEGRENADE;
+			ammo_id = CSW_HEGRENADE;
+			copy(weapon_classname, 31, "weapon_hegrenade");
+		}
+		case GUN_FLASH:
+		{
+			weapon_id = CSW_FLASHBANG;
+			ammo_id = CSW_FLASHBANG;
+			copy(weapon_classname, 31, "weapon_flashbang");
+		}
+		case GUN_SMOKE:
+		{
+			weapon_id = CSW_SMOKEGRENADE;
+			ammo_id = CSW_SMOKEGRENADE;
+			copy(weapon_classname, 31, "weapon_smokegrenade");
+		}
+		case GUN_DEAGLE:
+		{
+			weapon_id = CSW_DEAGLE;
+			ammo_id = CSW_DEAGLE;
+			copy(weapon_classname, 31, "weapon_deagle");
+		}
+		case GUN_SCOUT:
+		{
+			weapon_id = CSW_SCOUT;
+			ammo_id = CSW_SCOUT;
+			copy(weapon_classname, 31, "weapon_scout");
+		}
+		case GUN_USP:
+		{
+			weapon_id = CSW_USP;
+			ammo_id = CSW_USP;
+			copy(weapon_classname, 31, "weapon_usp");
+		}
+		case GUN_AK47:
+		{
+			weapon_id = CSW_AK47;
+			ammo_id = CSW_AK47;
+			copy(weapon_classname, 31, "weapon_ak47");
+		}
+	}
+}
+
+ActionGunBlock(id, ent, block_type)
+{
+	new cooldown_index = block_type - GUN_HE;
+	new Float:gametime = get_gametime();
+	
+	// Check cooldown
+	if ( g_gunblock_next_use[id][cooldown_index] > 0.0 && gametime < g_gunblock_next_use[id][cooldown_index] )
+	{
+		if ( !g_has_hud_text[id] )
+		{
+			set_hudmessage(255, 50, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+			show_hudmessage(id, "%s^nNext use in %.1fs", g_block_names[block_type], g_gunblock_next_use[id][cooldown_index] - gametime);
+		}
+		return;
+	}
+	
+	static property[5];
+	GetProperty(ent, 1, property);
+	new bullets = str_to_num(property);
+	if ( bullets < 1 ) bullets = 1;
+	
+	new weapon_id, ammo_id;
+	new weapon_classname[32];
+	GetGunBlockWeaponInfo(block_type, weapon_id, ammo_id, weapon_classname);
+	
+	new bool:action_taken = false;
+	
+	// If player already has this exact weapon, just add bullets. Otherwise,
+	// check slot conflict (primary/pistol) and give the weapon if slot is free.
+	if ( user_has_weapon(id, weapon_id) )
+	{
+		// Same weapon: add bullets. Cap grenades at CS engine maximums.
+		new current_ammo = cs_get_user_bpammo(id, ammo_id);
+		new max_ammo;
+		switch ( block_type )
+		{
+			case GUN_HE:    max_ammo = 1;
+			case GUN_FLASH: max_ammo = 2;
+			case GUN_SMOKE: max_ammo = 1;
+			default:        max_ammo = 999; // guns effectively uncapped
+		}
+		
+		new new_ammo = current_ammo + bullets;
+		if ( new_ammo > max_ammo ) new_ammo = max_ammo;
+		
+		if ( new_ammo == current_ammo )
+		{
+			if ( !g_has_hud_text[id] )
+			{
+				set_hudmessage(255, 200, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+				show_hudmessage(id, "%s: already at max!", g_block_names[block_type]);
+			}
+			return;
+		}
+		
+		cs_set_user_bpammo(id, ammo_id, new_ammo);
+		
+		set_hudmessage(0, 255, 0, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+		show_hudmessage(id, "%s +%d bullet%s!", g_block_names[block_type], new_ammo - current_ammo, (new_ammo - current_ammo) == 1 ? "" : "s");
+		action_taken = true;
+	}
+	else
+	{
+		// Different weapon: check for slot conflict.
+		// Grenades don't conflict (each has its own slot).
+		// Primary: SCOUT, AK47. Pistol: DEAGLE, USP.
+		new bool:is_primary = (block_type == GUN_SCOUT || block_type == GUN_AK47);
+		new bool:is_pistol = (block_type == GUN_DEAGLE || block_type == GUN_USP);
+		
+		if ( is_primary && (user_has_weapon(id, CSW_SCOUT) || user_has_weapon(id, CSW_AK47)) )
+		{
+			if ( !g_has_hud_text[id] )
+			{
+				set_hudmessage(255, 200, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+				show_hudmessage(id, "%s: You already have a different primary!", g_block_names[block_type]);
+			}
+			return;
+		}
+		if ( is_pistol && (user_has_weapon(id, CSW_DEAGLE) || user_has_weapon(id, CSW_USP)) )
+		{
+			if ( !g_has_hud_text[id] )
+			{
+				set_hudmessage(255, 200, 50, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+				show_hudmessage(id, "%s: You already have a different pistol!", g_block_names[block_type]);
+			}
+			return;
+		}
+		
+		// Give the weapon.
+		give_item(id, weapon_classname);
+		
+		if ( is_primary || is_pistol )
+		{
+			// Set exact bullet count on the loaded weapon, no reserve.
+			new weap_ent = find_ent_by_owner(-1, weapon_classname, id);
+			if ( weap_ent > 0 )
+			{
+				cs_set_weapon_ammo(weap_ent, bullets);
+			}
+			cs_set_user_bpammo(id, ammo_id, 0);
+		}
+		else
+		{
+			// Grenade: give_item added 1; set the exact desired amount.
+			cs_set_user_bpammo(id, ammo_id, bullets);
+		}
+		
+		set_hudmessage(0, 255, 0, 0.01, 0.18, 0, 0.0, 1.0, 0.25, 0.25, 2);
+		show_hudmessage(id, "%s (%d bullet%s)", g_block_names[block_type], bullets, bullets == 1 ? "" : "s");
+		action_taken = true;
+	}
+	
+	// Only start cooldown if an action was actually taken.
+	if ( action_taken )
+	{
+		GetProperty(ent, 2, property);
+		new Float:reset_time = str_to_float(property);
+		if ( reset_time > 0.0 )
+		{
+			g_gunblock_next_use[id][cooldown_index] = gametime + reset_time;
+		}
+		else
+		{
+			// reset_time == 0: block resets on next round. Sentinel far in the
+			// future ensures it can't be reused until EventNewRound clears it.
+			g_gunblock_next_use[id][cooldown_index] = gametime + 999999.0;
+		}
+	}
 }
 
 ActionXPBlock(id, ent)
@@ -5412,6 +5702,13 @@ LoadBlocks(id)
 				case 'T': block_type = BOOTS_OF_SPEED;
 				case 'U': block_type = XPBLOCK;
 				case 'V': block_type = MONEYGIVER;
+				case 'W': block_type = GUN_HE;
+				case 'X': block_type = GUN_FLASH;
+				case 'Y': block_type = GUN_SMOKE;
+				case 'Z': block_type = GUN_DEAGLE;
+				case 'a': block_type = GUN_SCOUT;
+				case 'b': block_type = GUN_USP;
+				case 'c': block_type = GUN_AK47;
 				case '*':
 				{
 					CreateTeleport(0, TELEPORT_START, origin);
@@ -5480,6 +5777,12 @@ ResetPlayer(id)
 	g_has_hud_text[id] =		false;
 	g_xpblock_count[id] =		0;
 	g_moneygiver_count[id] =	0;
+	
+	// Reset gun block cooldowns on spawn
+	for ( new i = 0; i < 7; i++ )
+	{
+		g_gunblock_next_use[id][i] = 0.0;
+	}
 	
 	g_slap_times[id] =		0;
 	g_honey[id] =			0;
